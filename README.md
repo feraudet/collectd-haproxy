@@ -23,6 +23,10 @@ One or more Proxies to ignore
  Specify multiple times to specify additional proxies
 * `Socket`  
 File location of the HAProxy management socket
+* `Plugin`  
+Set plugin name (default: haproxy)
+* `UsePluginInstance`  
+Optional, if set to True proxy will be set in Collectd plugin_instance instead of concatened to type_instance
 * `Verbose`  
 Enable verbose logging
 
