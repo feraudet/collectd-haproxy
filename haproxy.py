@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # haproxy-collectd-plugin - haproxy.py
 #
 # Author: Michael Leinartas
@@ -5,9 +6,87 @@
 # collect metrics from haproxy.
 # Plugin structure and logging func taken from https://github.com/phrawzty/rabbitmq-collectd-plugin
 
-import collectd
 import socket
 import csv
+if __name__ != "__main__":
+    import collectd
+else:
+    import sys
+    from datetime import datetime
+    class Collectd:
+        """Proxy class """
+
+        def __init__(self):
+            self.values = []
+            self.config = None
+            self.init = None
+            self.read = None
+
+        def register_config(self, function):
+            self.config = function
+
+        def register_init(self, function):
+            self.init = function
+
+        def register_read(self, function):
+            self.read = function
+
+        def Values(self, **args):
+            return Values(**args)
+
+        def error(self, msg):
+            print("ERROR: " + msg)
+
+        def warning(self, msg):
+            print("WARNING: " + msg)
+
+        def info(self, msg):
+            print("INFO: " + msg)
+
+    class Configuration:
+        """Proxy configuration class"""
+        def __init__(self, args):
+            self.children = [];
+            args.pop(0)
+            for arg in args:
+                if "=" not in arg:
+                    logger('err', 'Invalid argument, must be like key=val')
+                else:
+                    self.children.append(Node({arg.split("=")[0]: arg.split("=")[1]}))
+
+    class Node:
+        """Proxy node class for configuration"""
+        def __init__(self, entry):
+            self.key = entry.keys()[0]
+            self.values = entry.values()
+
+    class Values:
+        def __init__(self, **kwargs):
+            self.host = kwargs.get('host', socket.getfqdn())
+            self.plugin = kwargs.get('plugin', NAME)
+            self.plugin_instance = kwargs.get('plugin_instance', '')
+            self.type = kwargs.get('type')
+            self.type_instance = kwargs.get('type_instance', '')
+            self.time = datetime.utcnow()
+            self.values = []
+
+        def __str__(self):
+            if self.plugin_instance:
+                self.plugin_instance = "-" + self.plugin_instance
+            if self.type_instance:
+                self.type_instance = "-" + self.type_instance
+            return "%s: %s/%s%s/%s%s = %s" % (
+                self.time,
+                self.host,
+                self.plugin,
+                self.plugin_instance,
+                self.type,
+                self.type_instance,
+                self.values)
+
+        def dispatch(self):
+            print(self)
+
 
 NAME = 'haproxy'
 RECV_SIZE = 1024
@@ -35,6 +114,10 @@ METRIC_TYPES = {
   'Run_queue': ('run_queue', 'gauge'),
   'rate': ('session_rate', 'gauge'),
   'req_rate': ('request_rate', 'gauge'),
+  'qtime': ('qtime', 'gauge'),
+  'ctime': ('ctime', 'gauge'),
+  'rtime': ('rtime', 'gauge'),
+  'ttime': ('ttime', 'gauge'),
   'stot': ('session_total', 'counter'),
   'scur': ('session_current', 'gauge'),
   'wredis': ('redistributed', 'derive'),
@@ -123,11 +206,12 @@ def get_stats():
   return stats
 
 def configure_callback(conf):
-  global PROXY_MONITORS, PROXY_IGNORE, HAPROXY_SOCKET, VERBOSE_LOGGING
+  global PROXY_MONITORS, PROXY_IGNORE, HAPROXY_SOCKET, VERBOSE_LOGGING, USE_PLUGIN_INSTANCE, NAME
   PROXY_MONITORS = [ ]
   PROXY_IGNORE = [ ]
   HAPROXY_SOCKET = DEFAULT_SOCKET
   VERBOSE_LOGGING = False
+  USE_PLUGIN_INSTANCE = False
 
   for node in conf.children:
     if node.key == "ProxyMonitor":
@@ -136,6 +220,10 @@ def configure_callback(conf):
       PROXY_IGNORE.append(node.values[0])
     elif node.key == "Socket":
       HAPROXY_SOCKET = node.values[0]
+    elif node.key == "UsePluginInstance":
+      USE_PLUGIN_INSTANCE = bool(node.values[0])
+    elif node.key == "Plugin":
+      NAME = node.values[0]
     elif node.key == "Verbose":
       VERBOSE_LOGGING = bool(node.values[0])
     else:
@@ -165,8 +253,15 @@ def read_callback():
       continue
 
     key_root, val_type = METRIC_TYPES[key_root]
-    key_name = METRIC_DELIM.join([key_prefix, key_root])
-    val = collectd.Values(plugin=NAME, type=val_type)
+    plugin_instance = ""
+    if USE_PLUGIN_INSTANCE:
+        plugin_instance = key_prefix
+        key_name = key_root
+    elif not key_prefix:
+        key_name = key_root
+    else:
+        key_name = METRIC_DELIM.join([key_prefix, key_root])
+    val = collectd.Values(plugin=NAME, plugin_instance=plugin_instance, type=val_type)
     val.type_instance = key_name
     val.values = [ value ]
     val.dispatch()
@@ -182,5 +277,13 @@ def logger(t, msg):
     else:
         collectd.notice('%s: %s' % (NAME, msg))
 
-collectd.register_config(configure_callback)
-collectd.register_read(read_callback)
+if __name__ == "__main__":
+    collectd = Collectd()
+    conf = Configuration(sys.argv)
+    collectd.register_config(configure_callback)
+    collectd.register_read(read_callback)
+    collectd.config(conf)
+    collectd.read()
+else:
+    collectd.register_config(configure_callback)
+    collectd.register_read(read_callback)
